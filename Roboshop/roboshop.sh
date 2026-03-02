@@ -1,11 +1,13 @@
 #!/bin/bash
 # This tells the system to execute this file using the Bash shell.
 
+set -euo pipefail
+
 # -------------------------------
 # Static Configuration Variables
 # -------------------------------
 
-SG_ID="sg-076ec9ad23dab2b28" 
+SG_ID="sg-076ec9ad23dab2b28"
 # Security Group ID.
 # This controls firewall rules (ports like 22, 80, 443).
 
@@ -20,24 +22,29 @@ ZONE_ID="Z05013202FKF0ZL12WAOP"
 DOMAIN_NAME="daws88s.online"
 # Your base domain name.
 
+if [ "$#" -eq 0 ]; then
+    echo "Usage: $0 <service-name> [service-name ...]"
+    exit 1
+fi
+
 # --------------------------------
 # Loop through all input arguments
 # --------------------------------
-# $@ = all arguments passed to script
+# "$@" = all arguments passed to script
 # Example:
 # ./script.sh frontend backend mongodb
 # instance will become frontend, backend, mongodb one by one
 
-for instance in $@
+for instance in "$@"
 do
 
     # --------------------------------
     # Step 1: Create EC2 Instance
     # --------------------------------
     INSTANCE_ID=$( aws ec2 run-instances \
-        --image-id $AMI_ID \
+        --image-id "$AMI_ID" \
         --instance-type "t3.micro" \
-        --security-group-ids $SG_ID \
+        --security-group-ids "$SG_ID" \
         --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$instance}]" \
         --query 'Instances[0].InstanceId' \
         --output text )
@@ -51,16 +58,19 @@ do
     # - Extracts only InstanceId
     # - Stores in INSTANCE_ID variable
 
+    # Wait until instance enters running state so IP values are available.
+    aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+
     # --------------------------------
     # Step 2: Get IP Address
     # --------------------------------
 
-    if [ $instance == "frontend" ]; then
-        
+    if [ "$instance" = "frontend" ]; then
+
         # For frontend → use PUBLIC IP
         IP=$(
             aws ec2 describe-instances \
-            --instance-ids $INSTANCE_ID \
+            --instance-ids "$INSTANCE_ID" \
             --query 'Reservations[].Instances[].PublicIpAddress' \
             --output text
         )
@@ -70,11 +80,11 @@ do
         # daws88s.online
 
     else
-        
+
         # For backend/mongodb → use PRIVATE IP
         IP=$(
             aws ec2 describe-instances \
-            --instance-ids $INSTANCE_ID \
+            --instance-ids "$INSTANCE_ID" \
             --query 'Reservations[].Instances[].PrivateIpAddress' \
             --output text
         )
@@ -85,6 +95,11 @@ do
         # backend.daws88s.online
     fi
 
+    if [ -z "$IP" ] || [ "$IP" = "None" ]; then
+        echo "Failed to resolve IP for instance '$instance' ($INSTANCE_ID)." >&2
+        exit 1
+    fi
+
     echo "IP Address: $IP"
 
     # --------------------------------
@@ -92,27 +107,27 @@ do
     # --------------------------------
 
     aws route53 change-resource-record-sets \
-    --hosted-zone-id $ZONE_ID \
-    --change-batch '
+    --hosted-zone-id "$ZONE_ID" \
+    --change-batch "
     {
-        "Comment": "Updating record",
-        "Changes": [
+        \"Comment\": \"Updating record\",
+        \"Changes\": [
             {
-                "Action": "UPSERT",
-                "ResourceRecordSet": {
-                    "Name": "'$RECORD_NAME'",
-                    "Type": "A",
-                    "TTL": 1,
-                    "ResourceRecords": [
+                \"Action\": \"UPSERT\",
+                \"ResourceRecordSet\": {
+                    \"Name\": \"$RECORD_NAME\",
+                    \"Type\": \"A\",
+                    \"TTL\": 1,
+                    \"ResourceRecords\": [
                         {
-                            "Value": "'$IP'"
+                            \"Value\": \"$IP\"
                         }
                     ]
                 }
             }
         ]
     }
-    '
+    "
 
     # Explanation:
     # UPSERT = create if not exists, update if exists
@@ -121,5 +136,4 @@ do
     # Value = instance IP
 
     echo "record updated for $instance"
-
 done

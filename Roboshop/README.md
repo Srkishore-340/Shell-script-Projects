@@ -148,8 +148,8 @@ record updated for backend
 
 ## ⚠ Current Limitations
 
-- No error handling
-- No instance status validation
+- Basic fail-fast error handling (`set -euo pipefail`)
+- Instance wait logic added before DNS update
 - No AWS credential validation
 - No logging
 - TTL set to 1 (not production recommended)
@@ -158,8 +158,7 @@ record updated for backend
 
 ## 🚀 Suggested Production Improvements
 
-- Add instance wait logic
-- Add retry mechanism
+- Add retry mechanism for AWS API calls
 - Add proper logging
 - Add validation checks
 - Parameterize instance type
